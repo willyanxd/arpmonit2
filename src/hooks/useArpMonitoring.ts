@@ -1,139 +1,235 @@
 import { useState, useEffect, useCallback } from 'react';
-import { useLocalStorage } from './useLocalStorage';
 import { Job, Device, Alert, ScanResult } from '../types';
 
-// Mock data generator
-const mockVendors = ['Apple', 'Samsung', 'Intel', 'Broadcom', 'Cisco', 'TP-Link', 'Netgear', 'Linksys'];
-const mockHostnames = ['iPhone-12', 'MacBook-Pro', 'Samsung-TV', 'Windows-PC', 'Raspberry-Pi', 'Router', 'Printer'];
-
-const generateMockDevice = (): Device => {
-  const mac = Array.from({ length: 6 }, () => 
-    Math.floor(Math.random() * 256).toString(16).padStart(2, '0')
-  ).join(':');
-  
-  const ip = `192.168.1.${Math.floor(Math.random() * 254) + 1}`;
-  
-  return {
-    id: crypto.randomUUID(),
-    mac,
-    ip,
-    vendor: mockVendors[Math.floor(Math.random() * mockVendors.length)],
-    hostname: mockHostnames[Math.floor(Math.random() * mockHostnames.length)],
-    firstSeen: new Date(Date.now() - Math.random() * 7 * 24 * 60 * 60 * 1000),
-    lastSeen: new Date(),
-    isAuthorized: Math.random() > 0.3,
-    previousIps: []
-  };
-};
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:3001/api';
 
 export function useArpMonitoring() {
-  const [jobs, setJobs] = useLocalStorage<Job[]>('arp-jobs', []);
-  const [devices, setDevices] = useLocalStorage<Device[]>('arp-devices', []);
-  const [alerts, setAlerts] = useLocalStorage<Alert[]>('arp-alerts', []);
-  const [scanResults, setScanResults] = useLocalStorage<ScanResult[]>('arp-scan-results', []);
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [devices, setDevices] = useState<Device[]>([]);
+  const [alerts, setAlerts] = useState<Alert[]>([]);
+  const [scanResults, setScanResults] = useState<ScanResult[]>([]);
   const [isScanning, setIsScanning] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
-  // Initialize with mock data if empty
-  useEffect(() => {
-    if (devices.length === 0) {
-      const mockDevices = Array.from({ length: 15 }, generateMockDevice);
-      setDevices(mockDevices);
+  // Fetch data from API
+  const fetchJobs = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs`);
+      if (!response.ok) throw new Error('Failed to fetch jobs');
+      const data = await response.json();
+      setJobs(data);
+    } catch (err) {
+      console.error('Error fetching jobs:', err);
+      setError('Failed to fetch jobs');
     }
-  }, [devices.length, setDevices]);
+  }, []);
 
-  // Mock scan execution
+  const fetchDevices = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/devices`);
+      if (!response.ok) throw new Error('Failed to fetch devices');
+      const data = await response.json();
+      setDevices(data);
+    } catch (err) {
+      console.error('Error fetching devices:', err);
+      setError('Failed to fetch devices');
+    }
+  }, []);
+
+  const fetchAlerts = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/alerts`);
+      if (!response.ok) throw new Error('Failed to fetch alerts');
+      const data = await response.json();
+      setAlerts(data);
+    } catch (err) {
+      console.error('Error fetching alerts:', err);
+      setError('Failed to fetch alerts');
+    }
+  }, []);
+
+  const fetchScanResults = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/scans`);
+      if (!response.ok) throw new Error('Failed to fetch scan results');
+      const data = await response.json();
+      setScanResults(data);
+    } catch (err) {
+      console.error('Error fetching scan results:', err);
+      setError('Failed to fetch scan results');
+    }
+  }, []);
+
+  // Initial data load
+  useEffect(() => {
+    const loadData = async () => {
+      setLoading(true);
+      await Promise.all([
+        fetchJobs(),
+        fetchDevices(),
+        fetchAlerts(),
+        fetchScanResults()
+      ]);
+      setLoading(false);
+    };
+
+    loadData();
+  }, [fetchJobs, fetchDevices, fetchAlerts, fetchScanResults]);
+
+  // Polling for real-time updates
+  useEffect(() => {
+    const interval = setInterval(() => {
+      fetchDevices();
+      fetchAlerts();
+      fetchScanResults();
+    }, 30000); // Poll every 30 seconds
+
+    return () => clearInterval(interval);
+  }, [fetchDevices, fetchAlerts, fetchScanResults]);
+
+  // Execute scan
   const executeScan = useCallback(async (job: Job): Promise<ScanResult> => {
     setIsScanning(true);
-    
-    // Simulate scan delay
-    await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 3000));
-    
-    const timestamp = new Date();
-    const newDevices: Device[] = [];
-    const scanAlerts: Alert[] = [];
-    
-    // Randomly generate new devices
-    if (Math.random() > 0.7) {
-      const newDevice = generateMockDevice();
-      newDevices.push(newDevice);
-      
-      if (job.alertConfig.newDeviceAlert) {
-        scanAlerts.push({
-          id: crypto.randomUUID(),
-          jobId: job.id,
-          jobName: job.name,
-          type: 'new_device',
-          level: newDevice.isAuthorized ? 'info' : 'warning',
-          title: 'New Device Detected',
-          message: `New device ${newDevice.vendor} (${newDevice.mac}) found at ${newDevice.ip}`,
-          device: newDevice,
-          timestamp,
-          acknowledged: false
-        });
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${job.id}/execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to execute scan');
       }
-      
-      if (!newDevice.isAuthorized && job.alertConfig.unauthorizedDeviceAlert) {
-        scanAlerts.push({
-          id: crypto.randomUUID(),
-          jobId: job.id,
-          jobName: job.name,
-          type: 'unauthorized_device',
-          level: 'critical',
-          title: 'Unauthorized Device',
-          message: `Unauthorized device ${newDevice.vendor} (${newDevice.mac}) detected at ${newDevice.ip}`,
-          device: newDevice,
-          timestamp,
-          acknowledged: false
-        });
-      }
+
+      // Refresh data after scan
+      await Promise.all([
+        fetchDevices(),
+        fetchAlerts(),
+        fetchScanResults()
+      ]);
+
+      // Return a mock result for now - in real implementation, 
+      // the API would return the actual scan result
+      const result: ScanResult = {
+        id: crypto.randomUUID(),
+        jobId: job.id,
+        timestamp: new Date(),
+        devicesFound: 0,
+        newDevices: 0,
+        alerts: [],
+        executionTime: 0,
+        status: 'success'
+      };
+
+      return result;
+    } catch (err) {
+      console.error('Error executing scan:', err);
+      throw err;
+    } finally {
+      setIsScanning(false);
     }
-    
-    const result: ScanResult = {
-      id: crypto.randomUUID(),
-      jobId: job.id,
-      timestamp,
-      devicesFound: devices.length + newDevices.length,
-      newDevices: newDevices.length,
-      alerts: scanAlerts,
-      executionTime: Math.floor(Math.random() * 5000) + 1000,
-      status: 'success'
-    };
-    
-    setDevices(prev => [...prev, ...newDevices]);
-    setAlerts(prev => [...scanAlerts, ...prev]);
-    setScanResults(prev => [result, ...prev.slice(0, 99)]); // Keep last 100 results
-    setIsScanning(false);
-    
-    return result;
-  }, [devices.length, setDevices, setAlerts, setScanResults]);
+  }, [fetchDevices, fetchAlerts, fetchScanResults]);
 
-  const createJob = useCallback((job: Omit<Job, 'id' | 'createdAt'>) => {
-    const newJob: Job = {
-      ...job,
-      id: crypto.randomUUID(),
-      createdAt: new Date()
-    };
-    setJobs(prev => [...prev, newJob]);
-    return newJob;
-  }, [setJobs]);
+  // Create job
+  const createJob = useCallback(async (jobData: Omit<Job, 'id' | 'createdAt'>) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(jobData),
+      });
 
-  const updateJob = useCallback((id: string, updates: Partial<Job>) => {
-    setJobs(prev => prev.map(job => job.id === id ? { ...job, ...updates } : job));
-  }, [setJobs]);
+      if (!response.ok) {
+        throw new Error('Failed to create job');
+      }
 
-  const deleteJob = useCallback((id: string) => {
-    setJobs(prev => prev.filter(job => job.id !== id));
-  }, [setJobs]);
+      await fetchJobs();
+      return response.json();
+    } catch (err) {
+      console.error('Error creating job:', err);
+      throw err;
+    }
+  }, [fetchJobs]);
 
-  const acknowledgeAlert = useCallback((id: string) => {
-    setAlerts(prev => prev.map(alert => 
-      alert.id === id ? { ...alert, acknowledged: true } : alert
-    ));
-  }, [setAlerts]);
+  // Update job
+  const updateJob = useCallback(async (id: string, updates: Partial<Job>) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(updates),
+      });
 
-  const clearAlerts = useCallback(() => {
-    setAlerts([]);
-  }, [setAlerts]);
+      if (!response.ok) {
+        throw new Error('Failed to update job');
+      }
+
+      await fetchJobs();
+    } catch (err) {
+      console.error('Error updating job:', err);
+      throw err;
+    }
+  }, [fetchJobs]);
+
+  // Delete job
+  const deleteJob = useCallback(async (id: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/jobs/${id}`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to delete job');
+      }
+
+      await fetchJobs();
+    } catch (err) {
+      console.error('Error deleting job:', err);
+      throw err;
+    }
+  }, [fetchJobs]);
+
+  // Acknowledge alert
+  const acknowledgeAlert = useCallback(async (id: string) => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/alerts/${id}/acknowledge`, {
+        method: 'PATCH',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to acknowledge alert');
+      }
+
+      await fetchAlerts();
+    } catch (err) {
+      console.error('Error acknowledging alert:', err);
+      throw err;
+    }
+  }, [fetchAlerts]);
+
+  // Clear alerts
+  const clearAlerts = useCallback(async () => {
+    try {
+      const response = await fetch(`${API_BASE_URL}/alerts`, {
+        method: 'DELETE',
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to clear alerts');
+      }
+
+      await fetchAlerts();
+    } catch (err) {
+      console.error('Error clearing alerts:', err);
+      throw err;
+    }
+  }, [fetchAlerts]);
 
   return {
     jobs,
@@ -141,11 +237,19 @@ export function useArpMonitoring() {
     alerts,
     scanResults,
     isScanning,
+    loading,
+    error,
     executeScan,
     createJob,
     updateJob,
     deleteJob,
     acknowledgeAlert,
-    clearAlerts
+    clearAlerts,
+    refreshData: () => {
+      fetchJobs();
+      fetchDevices();
+      fetchAlerts();
+      fetchScanResults();
+    }
   };
 }

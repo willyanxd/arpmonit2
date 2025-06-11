@@ -1,11 +1,41 @@
 import React from 'react';
-import { Activity, AlertTriangle, Shield, Users, Clock, TrendingUp } from 'lucide-react';
+import { Activity, AlertTriangle, Shield, Users, Clock, TrendingUp, RefreshCw } from 'lucide-react';
 import { useArpMonitoring } from '../hooks/useArpMonitoring';
 import { Alert } from '../types';
 import { formatDistanceToNow } from 'date-fns';
 
 export function Dashboard() {
-  const { jobs, devices, alerts, scanResults } = useArpMonitoring();
+  const { jobs, devices, alerts, scanResults, loading, error, refreshData } = useArpMonitoring();
+
+  if (loading) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="flex items-center justify-center h-64">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-400"></div>
+          <span className="ml-3 text-gray-400">Loading dashboard...</span>
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="p-6 max-w-7xl mx-auto">
+        <div className="bg-red-500/10 border border-red-500/20 rounded-lg p-4">
+          <div className="flex items-center space-x-2">
+            <AlertTriangle className="h-5 w-5 text-red-400" />
+            <span className="text-red-400">Error loading dashboard: {error}</span>
+            <button
+              onClick={refreshData}
+              className="ml-auto px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded text-sm transition-colors"
+            >
+              Retry
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const activeJobs = jobs.filter(job => job.isActive);
   const unauthorizedDevices = devices.filter(device => !device.isAuthorized);
@@ -54,9 +84,18 @@ export function Dashboard() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      <div className="mb-8">
-        <h1 className="text-3xl font-bold text-white mb-2">Network Monitoring Dashboard</h1>
-        <p className="text-gray-400">Real-time ARP network monitoring and device detection</p>
+      <div className="flex items-center justify-between mb-8">
+        <div>
+          <h1 className="text-3xl font-bold text-white mb-2">Network Monitoring Dashboard</h1>
+          <p className="text-gray-400">Real-time ARP network monitoring and device detection</p>
+        </div>
+        <button
+          onClick={refreshData}
+          className="flex items-center space-x-2 px-4 py-2 bg-gray-700 hover:bg-gray-600 text-white rounded-lg transition-colors"
+        >
+          <RefreshCw className="h-4 w-4" />
+          <span>Refresh</span>
+        </button>
       </div>
 
       {/* Stats Grid */}
