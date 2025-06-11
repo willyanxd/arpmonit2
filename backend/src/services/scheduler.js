@@ -235,3 +235,5 @@ export async function executeJobManually(jobId) {
     throw error;
   }
 }
+
+export { scheduleJob }
